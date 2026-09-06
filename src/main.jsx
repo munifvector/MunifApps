@@ -218,7 +218,7 @@ function Reels({user,onJob}){
    let vf=mode==='blur'
     ? `split=2[a][b];[a]scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h},boxblur=20:10[bg];[b]scale=${w}:${h}:force_original_aspect_ratio=decrease[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2`
     : `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}`
-   const esc=s=>s.replaceAll(':','\\\\:').replaceAll(\"'\",\"\\\\'\")
+   const esc=s=>String(s).replaceAll(':','\\:').replaceAll("'","\\'")
    if(top)vf+=`,drawtext=text='${esc(top)}':fontcolor=white:fontsize=54:x=(w-text_w)/2:y=80:box=1:boxcolor=black@0.45:boxborderw=16`
    if(bottom)vf+=`,drawtext=text='${esc(bottom)}':fontcolor=white:fontsize=48:x=(w-text_w)/2:y=h-150:box=1:boxcolor=black@0.45:boxborderw=14`
    if(wm)vf+=`,drawtext=text='${esc(wm)}':fontcolor=white@0.55:fontsize=28:x=w-text_w-25:y=25`
