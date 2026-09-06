@@ -165,45 +165,86 @@ function DownloadButton({blob,name}){
 }
 
 function Joiner({user,onJob}){
- const [files,setFiles]=useState([]), [status,setStatus]=useState('Siap.'), [blob,setBlob]=useState(null), {load,loading}=useFFmpeg()
+ const [files,setFiles]=useState([]), [status,setStatus]=useState('Siap.'), [blob,setBlob]=useState(null), [busy,setBusy]=useState(false), {load}=useFFmpeg()
  async function run(){
   if(files.length<2)return setStatus('Tambahkan minimal 2 video.')
-  setStatus('Memuat FFmpeg…'); const ff=await load(); setStatus('Memproses video…')
+  setBusy(true); setBlob(null); setStatus('Memuat FFmpeg…')
+  const ff=await load(); const id=`join_${Date.now()}`; const listFile=`${id}.txt`; const outFile=`${id}.mp4`
   try{
-   const list=files.map((_,i)=>`input${i}.mp4`).join('\n')
-   await ff.writeFile('list.txt',new TextEncoder().encode(files.map((_,i)=>`file 'input${i}.mp4'`).join('\n')))
-   for(let i=0;i<files.length;i++) await ff.writeFile(`input${i}.mp4`,await fetchFile(files[i]))
-   let code=await ff.exec(['-f','concat','-safe','0','-i','list.txt','-c','copy','out.mp4'])
-   if(code!==0){code=await ff.exec(['-f','concat','-safe','0','-i','list.txt','-c:v','libx264','-preset','veryfast','-crf','20','-c:a','aac','out.mp4'])}
-   const data=await ff.readFile('out.mp4'); const b=new Blob([data.buffer],{type:'video/mp4'}); setBlob(b); setStatus('Selesai.')
-   await saveJob(user,'Video Joiner',`${files.length} video`,'MunifApps_Joined.mp4',{count:files.length}); onJob()
-  }catch(e){setStatus('Gagal: '+e.message)}
+   // Gunakan nama file unik agar hasil percobaan sebelumnya tidak pernah terbaca lagi.
+   const names=[]
+   for(let i=0;i<files.length;i++){
+    const n=`${id}_input${i}.mp4`; names.push(n); await ff.writeFile(n,await fetchFile(files[i]))
+   }
+   await ff.writeFile(listFile,new TextEncoder().encode(names.map(n=>`file '${n}'`).join('\n')))
+   setStatus(`Menggabungkan ${files.length} video…`)
+
+   // Stream-copy dicoba terlebih dahulu. Jika format/codec tidak kompatibel,
+   // otomatis fallback ke re-encode sehingga durasi seluruh video tetap dijumlahkan.
+   let code=await ff.exec(['-f','concat','-safe','0','-i',listFile,'-c','copy','-movflags','+faststart',outFile])
+   if(code!==0){
+    try{ await ff.deleteFile(outFile) }catch{}
+    setStatus('Format video berbeda, menyesuaikan codec…')
+    code=await ff.exec([
+      '-f','concat','-safe','0','-i',listFile,
+      '-c:v','libx264','-preset','veryfast','-crf','20','-pix_fmt','yuv420p',
+      '-c:a','aac','-b:a','128k','-movflags','+faststart',outFile
+    ])
+   }
+   if(code!==0) throw new Error('FFmpeg gagal menggabungkan video. Coba video MP4 yang kompatibel.')
+
+   const data=await ff.readFile(outFile)
+   const b=new Blob([data],{type:'video/mp4'})
+   setBlob(b); setStatus('Selesai. Hasil baru siap di-download.')
+   await saveJob(user,'Video Joiner',`${files.length} video`,'MunifApps_Joined.mp4',{count:files.length})
+   onJob()
+  }catch(e){setStatus('Gagal: '+(e?.message||e))}
+  finally{
+   // Bersihkan file virtual FFmpeg agar proses berikutnya benar-benar mulai dari nol.
+   try{await ff.deleteFile(listFile)}catch{}
+   for(let i=0;i<files.length;i++) try{await ff.deleteFile(`${id}_input${i}.mp4`)}catch{}
+   try{await ff.deleteFile(outFile)}catch{}
+   setBusy(false)
+  }
  }
  return <ToolShell title="Video Joiner" desc="Satukan beberapa video menjadi satu file." status={status}>
   <div className="card"><h3>1. Pilih Video</h3><FilePicker files={files} setFiles={setFiles}/></div>
-  <div className="action-row"><button className="primary" onClick={run} disabled={loading}><Film size={17}/> {loading?'Memuat FFmpeg…':'Gabung Video'}</button><DownloadButton blob={blob} name="MunifApps_Joined.mp4"/></div>
+  <div className="action-row"><button className="primary" onClick={run} disabled={busy}>{busy?<Loader2 className="spin"/>:<Film size={17}/>} {busy?'Memproses…':'Gabung Video'}</button><DownloadButton blob={blob} name="MunifApps_Joined.mp4"/></div>
  </ToolShell>
 }
 
 function Looper({user,onJob}){
- const [files,setFiles]=useState([]),[loops,setLoops]=useState(2),[status,setStatus]=useState('Siap.'),[blob,setBlob]=useState(null),{load,loading}=useFFmpeg()
+ const [files,setFiles]=useState([]),[loops,setLoops]=useState(2),[status,setStatus]=useState('Siap.'),[blob,setBlob]=useState(null),[busy,setBusy]=useState(false),{load}=useFFmpeg()
  async function run(){
   if(!files.length)return setStatus('Pilih video.')
-  const ff=await load(); setStatus('Memproses loop…')
+  const count=Math.max(1,Math.min(9999,Number(loops)||1)); setBusy(true); setBlob(null)
+  const ff=await load(); const id=`loop_${Date.now()}`; const listFile=`${id}.txt`; const outFile=`${id}.mp4`
   try{
-   const names=[]; for(let i=0;i<files.length;i++){const n=`v${i}.mp4`;names.push(n);await ff.writeFile(n,await fetchFile(files[i]))}
-   const lines=[]; for(let x=0;x<loops;x++) names.forEach(n=>lines.push(`file '${n}'`))
-   await ff.writeFile('list.txt',new TextEncoder().encode(lines.join('\n')))
-   let code=await ff.exec(['-f','concat','-safe','0','-i','list.txt','-c','copy','loop.mp4'])
-   if(code!==0) code=await ff.exec(['-f','concat','-safe','0','-i','list.txt','-c:v','libx264','-preset','veryfast','-crf','20','-c:a','aac','loop.mp4'])
-   const d=await ff.readFile('loop.mp4');setBlob(new Blob([d.buffer],{type:'video/mp4'}));setStatus('Loop selesai.')
-   await saveJob(user,'Video Looper',`${files.length} video`, `MunifApps_Looped_${loops}x.mp4`,{loops});onJob()
-  }catch(e){setStatus('Gagal: '+e.message)}
+   const names=[]
+   for(let i=0;i<files.length;i++){const n=`${id}_v${i}.mp4`;names.push(n);await ff.writeFile(n,await fetchFile(files[i]))}
+   const lines=[]; for(let x=0;x<count;x++) names.forEach(n=>lines.push(`file '${n}'`))
+   await ff.writeFile(listFile,new TextEncoder().encode(lines.join('\n')))
+   setStatus(`Membuat ${count}× loop…`)
+   let code=await ff.exec(['-f','concat','-safe','0','-i',listFile,'-c','copy','-movflags','+faststart',outFile])
+   if(code!==0){
+    try{await ff.deleteFile(outFile)}catch{}
+    code=await ff.exec(['-f','concat','-safe','0','-i',listFile,'-c:v','libx264','-preset','veryfast','-crf','20','-pix_fmt','yuv420p','-c:a','aac','-b:a','128k','-movflags','+faststart',outFile])
+   }
+   if(code!==0) throw new Error('FFmpeg gagal membuat loop.')
+   const d=await ff.readFile(outFile);setBlob(new Blob([d],{type:'video/mp4'}));setStatus('Loop selesai. Hasil baru siap di-download.')
+   await saveJob(user,'Video Looper',`${files.length} video`, `MunifApps_Looped_${count}x.mp4`,{loops:count});onJob()
+  }catch(e){setStatus('Gagal: '+(e?.message||e))}
+  finally{
+   try{await ff.deleteFile(listFile)}catch{}
+   for(let i=0;i<files.length;i++) try{await ff.deleteFile(`${id}_v${i}.mp4`)}catch{}
+   try{await ff.deleteFile(outFile)}catch{}
+   setBusy(false)
+  }
  }
  return <ToolShell title="Video Looper" desc="Ulangi video atau playlist secara otomatis." status={status}>
   <div className="card"><h3>1. Pilih Video</h3><FilePicker files={files} setFiles={setFiles}/></div>
   <div className="card settings"><label>Jumlah Loop <input type="number" min="1" max="9999" value={loops} onChange={e=>setLoops(+e.target.value)}/></label></div>
-  <div className="action-row"><button className="primary" onClick={run}><Repeat2 size={17}/> Loop Video</button><DownloadButton blob={blob} name={`MunifApps_Looped_${loops}x.mp4`}/></div>
+  <div className="action-row"><button className="primary" onClick={run} disabled={busy}>{busy?<Loader2 className="spin"/>:<Repeat2 size={17}/>} {busy?'Memproses…':'Loop Video'}</button><DownloadButton blob={blob} name={`MunifApps_Looped_${Math.max(1,Number(loops)||1)}x.mp4`}/></div>
  </ToolShell>
 }
 
@@ -218,7 +259,7 @@ function Reels({user,onJob}){
    let vf=mode==='blur'
     ? `split=2[a][b];[a]scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h},boxblur=20:10[bg];[b]scale=${w}:${h}:force_original_aspect_ratio=decrease[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2`
     : `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}`
-   const esc=s=>String(s).replaceAll(':','\\:').replaceAll("'","\\'")
+   const esc=s=>s.replaceAll(':','\\\\:').replaceAll(\"'\",\"\\\\'\")
    if(top)vf+=`,drawtext=text='${esc(top)}':fontcolor=white:fontsize=54:x=(w-text_w)/2:y=80:box=1:boxcolor=black@0.45:boxborderw=16`
    if(bottom)vf+=`,drawtext=text='${esc(bottom)}':fontcolor=white:fontsize=48:x=(w-text_w)/2:y=h-150:box=1:boxcolor=black@0.45:boxborderw=14`
    if(wm)vf+=`,drawtext=text='${esc(wm)}':fontcolor=white@0.55:fontsize=28:x=w-text_w-25:y=25`

@@ -9,7 +9,7 @@ const SUPABASE_URL =
 
 const SUPABASE_PUBLISHABLE_KEY =
   import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
-  'sb_publishable_XpKEYeGewRadh800fkOcKQ_f4clTCPg'
+  'sb_publishable_LeV3L7odXOsuGh60S9oZEA_BnN8LSzj'
 
 export const supabase = createClient(
   SUPABASE_URL,
