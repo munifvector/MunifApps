@@ -178,20 +178,18 @@ function Joiner({user,onJob}){
    }
    await ff.writeFile(listFile,new TextEncoder().encode(names.map(n=>`file '${n}'`).join('\n')))
    setStatus(`Menggabungkan ${files.length} video…`)
-
-   // Stream-copy dicoba terlebih dahulu. Jika format/codec tidak kompatibel,
-   // otomatis fallback ke re-encode sehingga durasi seluruh video tetap dijumlahkan.
-   let code=await ff.exec(['-f','concat','-safe','0','-i',listFile,'-c','copy','-movflags','+faststart',outFile])
-   if(code!==0){
-    try{ await ff.deleteFile(outFile) }catch{}
-    setStatus('Format video berbeda, menyesuaikan codec…')
-    code=await ff.exec([
+    // Selalu re-encode saat join agar timestamp dan durasi setiap segmen terjaga.
+    // Stream-copy concat bisa menghasilkan durasi salah jika FPS, timestamp, codec,
+    // resolusi, atau audio antar video berbeda.
+    setStatus('Menggabungkan dan menyesuaikan durasi…')
+    const code=await ff.exec([
+      '-fflags','+genpts',
       '-f','concat','-safe','0','-i',listFile,
       '-c:v','libx264','-preset','veryfast','-crf','20','-pix_fmt','yuv420p',
-      '-c:a','aac','-b:a','128k','-movflags','+faststart',outFile
+      '-c:a','aac','-b:a','128k','-movflags','+faststart',
+      '-avoid_negative_ts','make_zero',outFile
     ])
-   }
-   if(code!==0) throw new Error('FFmpeg gagal menggabungkan video. Coba video MP4 yang kompatibel.')
+    if(code!==0) throw new Error('FFmpeg gagal menggabungkan video. Coba video MP4 yang kompatibel.')
 
    const data=await ff.readFile(outFile)
    const b=new Blob([data],{type:'video/mp4'})
@@ -259,7 +257,7 @@ function Reels({user,onJob}){
    let vf=mode==='blur'
     ? `split=2[a][b];[a]scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h},boxblur=20:10[bg];[b]scale=${w}:${h}:force_original_aspect_ratio=decrease[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2`
     : `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}`
-   const esc=s=>s.replaceAll(':','\\\\:').replaceAll(\"'\",\"\\\\'\")
+   const esc=s=>s.replaceAll(':','\\\\:').replaceAll("'","\\'")
    if(top)vf+=`,drawtext=text='${esc(top)}':fontcolor=white:fontsize=54:x=(w-text_w)/2:y=80:box=1:boxcolor=black@0.45:boxborderw=16`
    if(bottom)vf+=`,drawtext=text='${esc(bottom)}':fontcolor=white:fontsize=48:x=(w-text_w)/2:y=h-150:box=1:boxcolor=black@0.45:boxborderw=14`
    if(wm)vf+=`,drawtext=text='${esc(wm)}':fontcolor=white@0.55:fontsize=28:x=w-text_w-25:y=25`
